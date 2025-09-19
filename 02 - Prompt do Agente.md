@@ -1,191 +1,155 @@
-# Documentação do Projeto Hono + Cloudflare Pages (para Agentes de IA)
+# Guia para Agentes de IA – Hono + Cloudflare Pages
 
-## 1. Objetivo
+## 1️⃣ Objetivo
 
 Olá, agente! 🤖
-Você será responsável por **criar, manter e evoluir aplicações simples e médias** usando Hono + Cloudflare Pages.
-Seu papel inclui:
+Este guia é seu ponto de partida para **criar aplicações simples e médias** usando Hono + Cloudflare Pages.
 
-* Criar landing pages, formulários, catálogos ou pequenos dashboards.
-* Implementar rotas dinâmicas e APIs simples.
-* Integrar armazenamento usando Cloudflare D1 (relacional), KV ou R2.
-* Gerenciar SSR (Server-Side Rendering) usando React/JSX.
-* Garantir que o projeto funcione localmente e faça deploy correto na Cloudflare Pages.
+Você terá liberdade para:
 
-Este documento define **ambiente, ferramentas, convenções e boas práticas** que você deve seguir.
-
----
-
-## 2. Ambiente de Desenvolvimento
-
-O projeto funciona com a seguinte base:
-
-* **Gerenciador de pacotes:** `pnpm`
-* **Framework Backend:** Hono.js
-* **Framework Frontend:** React + JSX
-* **Renderização:** SSR com `hono/jsx-renderer`
-* **Build Tool:** Vite.js (configurado para SSR e assets client-side)
-* **Plataforma de Deploy:** Cloudflare Pages
-* **Banco de Dados:** Cloudflare D1 (SQLite), KV e R2 disponíveis
-* **Autenticação Wrangler:** OAuth via `wrangler login` (persistente)
-
-**Nota:** Você pode criar e gerenciar storages, bancos e rotas, consumindo APIs externas usando `fetch()`.
+* Criar landing pages, SPAs simples, dashboards ou micro-SaaS.
+* Definir rotas GET/POST e rotas dinâmicas.
+* Implementar SSR (Server-Side Rendering) com JSX.
+* Consumir APIs externas.
+* Usar Cloudflare D1 (relacional), KV ou R2 para armazenamento.
 
 ---
 
-## 3. Comandos Essenciais
+## 2️⃣ Ambiente Preparado
 
-### 3.1. Instalação de Dependências
+O ambiente que você recebe já possui:
 
-```bash
-pnpm install
+* Node.js + pnpm
+* Hono.js (backend + SSR)
+* React + JSX (frontend)
+* Vite.js (build, bundling e hot reload)
+* Wrangler CLI autenticado com Cloudflare via OAuth
+* Projeto inicial com template `cloudflare-pages`
+* Estrutura mínima pronta:
+
+```
+my-app/
+├── src/
+│   ├── index.tsx        # backend + rotas
+│   └── renderer.tsx     # template SSR
+├── vite.config.ts       # build / frontend
+├── wrangler.jsonc       # configuração Cloudflare
+└── package.json         # scripts e dependências
 ```
 
-### 3.2. Desenvolvimento Local
+---
+
+## 3️⃣ Comandos Essenciais
+
+| Objetivo              | Comando                                                             |
+| --------------------- | ------------------------------------------------------------------- |
+| Instalar dependências | `pnpm install`                                                      |
+| Rodar ambiente local  | `pnpm dev`                                                          |
+| Build + deploy        | `pnpm run deploy`                                                   |
+| Consultar banco D1    | `pnpm wrangler d1 execute <db> --command="SELECT * FROM messages;"` |
+| Validar autenticação  | `wrangler whoami`                                                   |
+
+**Observação:** Sempre use `pnpm run deploy` para enviar a aplicação; `pnpm deploy` não funciona corretamente.
+
+---
+
+## 4️⃣ Banco de Dados D1
+
+1. Criar banco:
 
 ```bash
-pnpm dev
+pnpm wrangler d1 create portfolio-db
 ```
 
-* Executa `wrangler pages dev ./dist` internamente.
-* Servidor local com hot reload para backend Hono e frontend React.
+2. Criar schema inicial (`schema.sql`):
 
-### 3.3. Banco de Dados (D1)
+```sql
+CREATE TABLE messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  email TEXT,
+  message TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
 
-* **Criar ou atualizar schema:**
-
-  ```bash
-  pnpm wrangler d1 execute <database_name> --local --file=schema.sql
-  pnpm wrangler d1 execute <database_name> --remote --file=schema.sql
-  ```
-
-* **Consultar dados para debug:**
-
-  ```bash
-  pnpm wrangler d1 execute <database_name> --local --command="SELECT * FROM messages;"
-  ```
-
-### 3.4. Deploy para Cloudflare Pages
+3. Executar schema local e remoto:
 
 ```bash
-pnpm run deploy
+pnpm wrangler d1 execute portfolio-db --local --file=schema.sql
+pnpm wrangler d1 execute portfolio-db --remote --file=schema.sql
 ```
 
-* Executa build (`vite build`) e deploy (`wrangler pages deploy ./dist`).
-* **Atenção:** sempre usar `pnpm run deploy`, não `pnpm deploy`.
+4. Acessar dados via binding em `index.tsx`:
+
+```ts
+const { results } = await c.env.DB.prepare('SELECT * FROM messages').all();
+```
 
 ---
 
-## 4. Estrutura de Arquivos e Convenções
+## 5️⃣ Rotas e SSR
 
-* **`wrangler.jsonc`** → Configuração Cloudflare, bindings de D1/KV/R2, deploy.
-* **`src/index.tsx`** → Ponto de entrada do Hono:
+* **GET** e **POST** simples:
 
-  * Definir rotas GET/POST.
-  * Acessar bindings via `c.env`:
+```ts
+app.get('/', (c) => c.render(<h1>Hello, world!</h1>));
+app.post('/contact', async (c) => {
+  const data = await c.req.parseBody();
+  await c.env.DB.prepare('INSERT INTO messages(name,email,message) VALUES (?,?,?)')
+    .bind(data.name, data.email, data.message)
+    .run();
+  return c.json({ success: true });
+});
+```
 
-    ```ts
-    const { results } = await c.env.DB.prepare('SELECT * FROM messages').all();
-    ```
-* **`src/renderer.tsx`** → Template base SSR:
+* **Rotas dinâmicas:**
 
-  * Define `<html>`, `<head>`, `<body>`
-  * Inclui folhas de estilo globais e scripts client-side.
+```ts
+app.get('/products/:id', async (c) => {
+  const id = c.req.param('id');
+  // lógica
+});
+```
 
----
-
-## 5. Tecnologias Disponíveis para o Agente
-
-Você pode usar:
-
-* **Hono:** Rotas, middleware, SSR.
-* **React + JSX:** Componentes de frontend.
-* **Vite:** Build e hot reload.
-* **D1:** Banco SQLite para dados relacionais simples.
-* **KV:** Key-Value para storage leve.
-* **R2:** Object storage para arquivos grandes ou assets.
-* **Fetch / APIs externas:** Consumir qualquer API pública ou privada.
-
-**Observação:** Você pode criar rotas dinâmicas, endpoints REST, SSR e consumo de APIs sem restrições.
+* **SSR via JSX:** sempre usar `c.render()` com `renderer.tsx`.
 
 ---
 
-## 6. Boas Práticas de Desenvolvimento
+## 6️⃣ Bindings Disponíveis
 
-1. **Rotas e SSR**
+* **D1Database:** banco relacional (SQLite)
+* **KVNamespace:** key-value storage
+* **R2Bucket:** object storage para arquivos grandes
+* **Variables:** configuração de variáveis de ambiente
 
-   * Sempre defina tipos de bindings:
+**Uso em rota Hono:**
 
-     ```ts
-     type Bindings = { DB: D1Database }
-     const app = new Hono<{ Bindings: Bindings }>()
-     ```
-   * Use `c.render()` para enviar HTML gerado via JSX.
-
-2. **Formulários e APIs**
-
-   * Parse do body de formulários:
-
-     ```ts
-     const data = await c.req.parseBody()
-     ```
-   * Inserção no banco D1:
-
-     ```ts
-     await c.env.DB.prepare('INSERT INTO messages(name,email) VALUES (?,?)').bind(data.name, data.email).run()
-     ```
-
-3. **Rotas dinâmicas**
-
-   * Exemplos:
-
-     ```ts
-     app.get('/products/:id', async (c) => { ... })
-     app.post('/api/contact', async (c) => { ... })
-     ```
-
-4. **Consumindo APIs externas**
-
-   ```ts
-   const res = await fetch('https://api.example.com/data')
-   const data = await res.json()
-   return c.json(data)
-   ```
-
-5. **Deploy e testes**
-
-   * Teste local: `pnpm dev`
-   * Deploy: `pnpm run deploy`
-   * Sempre valide `wrangler whoami` para confirmar autenticação.
+```ts
+const app = new Hono<{ Bindings: { DB: D1Database, MY_KV: KVNamespace } }>();
+```
 
 ---
 
-## 7. Exemplo de Workflow Inicial do Agente
+## 7️⃣ Consumo de APIs Externas
 
-**Tarefa 1:** Criar landing page mínima (`index.tsx`)
+Você pode chamar qualquer API pública ou privada com `fetch()`:
 
-* Header, main, footer, formulário simples
-
-**Tarefa 2:** Configurar banco D1 e tabela `messages`
-
-* Criar schema `schema.sql`
-* Executar local e remoto
-
-**Tarefa 3:** Implementar rota POST `/contact` para inserir dados no banco
-
-**Tarefa 4:** Implementar rota GET `/messages` para listar registros
-
-**Tarefa 5:** Testar local (`pnpm dev`) e fazer deploy (`pnpm run deploy`)
-
-**Tarefa 6:** Expandir conforme necessidade (rotas dinâmicas, APIs externas, KV, R2)
+```ts
+const res = await fetch('https://api.example.com/data');
+const data = await res.json();
+return c.json(data);
+```
 
 ---
 
-## 8. Observações Finais para o Agente
+## 8️⃣ Boas Práticas
 
-* Esta base **não é limitada a sites estáticos**.
-* Suporta **dinamicidade, rotas, SSR, APIs e banco de dados**.
-* Ideal para **MVPs, landing pages, catálogos ou dashboards simples a médios**.
-* Tudo deve ser feito de forma incremental, seguindo a sequência de tarefas, validando cada passo antes de prosseguir.
+1. Teste local antes de deploy (`pnpm dev`).
+2. Confirme bindings no `wrangler.jsonc`.
+3. Use SSR para páginas dinâmicas.
+4. Use rotas POST para formularios ou inserção de dados.
+5. Evite excesso de lógica pesada no Worker; use APIs externas se necessário.
+6. Valide autenticação com `wrangler whoami`.
 
 ---
